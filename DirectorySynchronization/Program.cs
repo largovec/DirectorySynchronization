@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 
 namespace DirectorySynchronization
 {
@@ -82,8 +83,6 @@ namespace DirectorySynchronization
                 return hashName ^ hashPath ^ hashIsDirectory ^ hashSize ^ hashLastWriteTime;
             }
         }
-
-
 
         static void WriteLog(string operation, string message)
         {
@@ -180,8 +179,45 @@ namespace DirectorySynchronization
             return (folderElements);
         }
 
+        static string CalculateMD5ForFile(string fileName)
+        {
+            MD5 md5 = MD5.Create();
 
-        static void UpdateDirectory(string sourcePath, string destinationPath)
+            FileStream stream = File.OpenRead(fileName);
+            byte[] hash = md5.ComputeHash(stream);
+            
+            return (BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant());
+        }
+
+        static bool FilesBytesContentCompare(string sourceFileName, string destinationFileName)
+        {
+            int sourceFilebyte;
+            int destinationFilebyte;
+            FileStream sourceFileStream;
+            FileStream destinationFileStream;
+
+            sourceFileStream = new FileStream(sourceFileName, FileMode.Open);
+            destinationFileStream = new FileStream(destinationFileName, FileMode.Open);
+
+            bool result = true;
+            // if by going thru there are two different bytes at same possition cyclus ends and files are not the same
+            do
+            {
+                sourceFilebyte = sourceFileStream.ReadByte();
+                destinationFilebyte = destinationFileStream.ReadByte();
+
+                if (sourceFilebyte != destinationFilebyte) { result = false; }
+            }
+            while ((sourceFilebyte == destinationFilebyte) && (sourceFilebyte != -1));
+
+            sourceFileStream.Close();
+            destinationFileStream.Close();
+
+            return result;
+        }
+
+
+        static void UpdateDirectory(string sourcePath, string destinationPath, int comparativeMethod)
         {
             HashSet<FolderElement> sourceFolderElements = SearchDirectory(sourcePath, @"\");
             HashSet<FolderElement> destinationFolderElements = SearchDirectory(destinationPath, @"\");
@@ -320,28 +356,68 @@ namespace DirectorySynchronization
                 }
             }
 
-
+            // check files that exist in source and destination and have same last access time and size for content
             HashSet<FolderElement> filesToCheckContent = new();
             filesToCheckContent = sourceFolderElements.Intersect(destinationFolderElements, new FileComparer()).Where(f => f.IsDirectory == false).ToHashSet();
+            foreach (FolderElement filesTCC in filesToCheckContent)
+            {
+                try
+                {
+                    bool result = true;
 
+                    switch (comparativeMethod)
+                    {
+                        case 1:
+                            result = FilesBytesContentCompare(sourcePath + filesTCC.Path + filesTCC.Name, destinationPath + filesTCC.Path + filesTCC.Name);
 
+                            break;
 
+                        case 2:
+                            string sourceMD5 = CalculateMD5ForFile(sourcePath + filesTCC.Path + filesTCC.Name);
+                            string destinationMD5 = CalculateMD5ForFile(destinationPath + filesTCC.Path + filesTCC.Name);
+                            if (!sourceMD5.Equals(destinationMD5)) { result = false; }
+                            
+                            break;
+                    }
 
-
-
+                    if (!result)
+                    {
+                        System.IO.File.Copy(sourcePath + filesTCC.Path + filesTCC.Name, destinationPath + filesTCC.Path + filesTCC.Name, true);
+                        WriteLog("Copy_File", destinationPath + filesTCC.Path + filesTCC.Name);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (ex is UnauthorizedAccessException)
+                    {
+                        WriteLog("Err_Copy_File_UnauthorizedAccessException", ex.Message);
+                    }
+                    if (ex is PathTooLongException)
+                    {
+                        WriteLog("Err_Copy_File_PathTooLongException", ex.Message);
+                    }
+                    if (ex is ArgumentNullException)
+                    {
+                        WriteLog("Err_Copy_File_ArgumentNullException", ex.Message);
+                    }
+                    if (ex is DirectoryNotFoundException)
+                    {
+                        WriteLog("Err_Copy_File_DirectoryNotFoundException", ex.Message);
+                    }
+                }
+            }
         }
-
-
-
 
 
         static void Main(string[] args)
         {
             // dohliadni na to aby cesta nekoncila lomitkom
+            // comparativeMethod: 1 - MD5, 2 - ByteToByte
+
 
             WriteLog("Synchronization_Start", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss"));
 
-            UpdateDirectory(@"D:\x_test_folder\source", @"D:\x_test_folder\dest");
+            UpdateDirectory(@"D:\x_test_folder\source", @"D:\x_test_folder\dest", 2);
 
             WriteLog("Synchronization_Finish", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss") + "\n----------------------------");
 
