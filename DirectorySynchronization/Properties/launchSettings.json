@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DirectorySynchronization": {
+      "commandName": "Project",
+      "commandLineArgs": "D:\\x_test_folder\\source D:\\x_test_folder\\dest -ld D:\\x_test_folder"
+    }
+  }
+}

@@ -9,6 +9,9 @@ namespace DirectorySynchronization
 {
     class Program
     {
+        static string LogPath = "";
+        static bool VerboseLogging = false;
+
         public class FolderElement : IEquatable<FolderElement>
         {
             // only name with extension(if it's file) without path
@@ -84,12 +87,35 @@ namespace DirectorySynchronization
             }
         }
 
+        public class ComandLineArgs
+        {
+            public string sourcePath;
+            public string destinationPath;
+            public string logPath;
+            public int syncInterval;
+            public int comparativeMethod;
+            public bool verboseLogging;
+            public string errorMessage;
+
+            public ComandLineArgs()
+            {
+                sourcePath = "";
+                destinationPath = "";
+                logPath = System.IO.Directory.GetCurrentDirectory();
+                if (!logPath.EndsWith(@"\")) { logPath = logPath + @"\"; }
+                syncInterval = 60;
+                comparativeMethod = 1;
+                verboseLogging = false;
+                errorMessage = "";
+            }
+        }
+
         static void WriteLog(string operation, string message)
         {
             string text = operation + ": " + message;
 
             Console.WriteLine(text);
-            System.IO.File.AppendAllText(@"d:\log.txt", text + Environment.NewLine);
+            System.IO.File.AppendAllText(LogPath + "log.txt", text + Environment.NewLine);
         }
 
         static HashSet<FolderElement> SearchDirectory(string basePath, string path)
@@ -151,7 +177,7 @@ namespace DirectorySynchronization
 
                     folderElements.Add(folderElement);
 
-                    //WriteLog("List_File", file);
+                    if (VerboseLogging == true) { WriteLog("List_File", file); }
                 }
             }
 
@@ -169,10 +195,9 @@ namespace DirectorySynchronization
 
                     folderElements.Add(folderElement);
 
-                    //WriteLog("List_Dir", dir);
+                    if (VerboseLogging == true) { WriteLog("List_Dir", dir); }
 
                     folderElements.UnionWith(SearchDirectory(basePath, path + dirInfo.Name + @"\"));
-                    //folderElements.AddRange(SearchDirectory(basePath, path + dirInfo.Name + @"\"));
                 }
             }
 
@@ -200,7 +225,7 @@ namespace DirectorySynchronization
             destinationFileStream = new FileStream(destinationFileName, FileMode.Open);
 
             bool result = true;
-            // if by going thru there are two different bytes at same possition cyclus ends and files are not the same
+            // if by going thru there are two different bytes at same possition cicle ends and files are not the same
             do
             {
                 sourceFilebyte = sourceFileStream.ReadByte();
@@ -217,10 +242,10 @@ namespace DirectorySynchronization
         }
 
 
-        static void UpdateDirectory(string sourcePath, string destinationPath, int comparativeMethod)
+        static void UpdateDirectory(ComandLineArgs comandLineArgs)
         {
-            HashSet<FolderElement> sourceFolderElements = SearchDirectory(sourcePath, @"\");
-            HashSet<FolderElement> destinationFolderElements = SearchDirectory(destinationPath, @"\");
+            HashSet<FolderElement> sourceFolderElements = SearchDirectory(comandLineArgs.sourcePath, @"\");
+            HashSet<FolderElement> destinationFolderElements = SearchDirectory(comandLineArgs.destinationPath, @"\");
 
 
             HashSet<FolderElement> filesToDelete = new();
@@ -231,9 +256,9 @@ namespace DirectorySynchronization
             {
                 try
                 {
-                    System.IO.File.Delete(destinationPath + fileTD.Path + fileTD.Name);
+                    System.IO.File.Delete(comandLineArgs.destinationPath + fileTD.Path + fileTD.Name);
 
-                    WriteLog("Delete_File", destinationPath + fileTD.Path + fileTD.Name);
+                    WriteLog("Delete_File", comandLineArgs.destinationPath + fileTD.Path + fileTD.Name);
                 }
                 catch (Exception ex)
                 {
@@ -265,8 +290,8 @@ namespace DirectorySynchronization
             {
                 try
                 {
-                    System.IO.Directory.Delete(destinationPath + directoryTD.Path + directoryTD.Name, true);
-                    WriteLog("Delete_Dir", destinationPath + directoryTD.Path + directoryTD.Name);
+                    System.IO.Directory.Delete(comandLineArgs.destinationPath + directoryTD.Path + directoryTD.Name, true);
+                    WriteLog("Delete_Dir", comandLineArgs.destinationPath + directoryTD.Path + directoryTD.Name);
                 }
                 catch (Exception ex)
                 {
@@ -298,8 +323,8 @@ namespace DirectorySynchronization
             {
                 try
                 {
-                    System.IO.Directory.CreateDirectory(destinationPath + directoryTC.Path + directoryTC.Name);
-                    WriteLog("Create_Dir", destinationPath + directoryTC.Path + directoryTC.Name);
+                    System.IO.Directory.CreateDirectory(comandLineArgs.destinationPath + directoryTC.Path + directoryTC.Name);
+                    WriteLog("Create_Dir", comandLineArgs.destinationPath + directoryTC.Path + directoryTC.Name);
                 }
                 catch (Exception ex)
                 {
@@ -332,8 +357,8 @@ namespace DirectorySynchronization
             {
                 try
                 {
-                    System.IO.File.Copy(sourcePath + filesTC.Path + filesTC.Name, destinationPath + filesTC.Path + filesTC.Name, true);
-                    WriteLog("Copy_File", destinationPath + filesTC.Path + filesTC.Name);
+                    System.IO.File.Copy(comandLineArgs.sourcePath + filesTC.Path + filesTC.Name, comandLineArgs.destinationPath + filesTC.Path + filesTC.Name, true);
+                    WriteLog("Copy_File", comandLineArgs.destinationPath + filesTC.Path + filesTC.Name);
                 }
                 catch (Exception ex)
                 {
@@ -365,16 +390,16 @@ namespace DirectorySynchronization
                 {
                     bool result = true;
 
-                    switch (comparativeMethod)
+                    switch (comandLineArgs.comparativeMethod)
                     {
                         case 1:
-                            result = FilesBytesContentCompare(sourcePath + filesTCC.Path + filesTCC.Name, destinationPath + filesTCC.Path + filesTCC.Name);
+                            result = FilesBytesContentCompare(comandLineArgs.sourcePath + filesTCC.Path + filesTCC.Name, comandLineArgs.destinationPath + filesTCC.Path + filesTCC.Name);
 
                             break;
 
                         case 2:
-                            string sourceMD5 = CalculateMD5ForFile(sourcePath + filesTCC.Path + filesTCC.Name);
-                            string destinationMD5 = CalculateMD5ForFile(destinationPath + filesTCC.Path + filesTCC.Name);
+                            string sourceMD5 = CalculateMD5ForFile(comandLineArgs.sourcePath + filesTCC.Path + filesTCC.Name);
+                            string destinationMD5 = CalculateMD5ForFile(comandLineArgs.destinationPath + filesTCC.Path + filesTCC.Name);
                             if (!sourceMD5.Equals(destinationMD5)) { result = false; }
                             
                             break;
@@ -382,8 +407,8 @@ namespace DirectorySynchronization
 
                     if (!result)
                     {
-                        System.IO.File.Copy(sourcePath + filesTCC.Path + filesTCC.Name, destinationPath + filesTCC.Path + filesTCC.Name, true);
-                        WriteLog("Copy_File", destinationPath + filesTCC.Path + filesTCC.Name);
+                        System.IO.File.Copy(comandLineArgs.sourcePath + filesTCC.Path + filesTCC.Name, comandLineArgs.destinationPath + filesTCC.Path + filesTCC.Name, true);
+                        WriteLog("Copy_File", comandLineArgs.destinationPath + filesTCC.Path + filesTCC.Name);
                     }
                 }
                 catch (Exception ex)
@@ -408,19 +433,185 @@ namespace DirectorySynchronization
             }
         }
 
+        static void DisplayHelp()
+        {
+            string[] help = {"Syntax:",
+                             "  DirectorySynchronization \"sourcePath\" \"destinationPath\" [-ld, -i, -c, -v, -?, -help]",
+                             "  sourcePath      - Source directory. Full path is required.",
+                             "  destinationPath - Destination directory. Full path is required.",
+                             "",
+                             "  Additional not mandatory parameters:",
+                             "  -ld \"logPath\" - Log directory. Full path is required.",
+                             "  -i minutes      - Synchronization repeat interval. Default '60' minutes.",
+                             "  -c MD5, BYTES   - Comparation method used to check content of files. Default is MD5.",
+                             "  -v NO, YES      - Verbose logging. Default is NO.",
+                             "  -?, -help       - Display help.",
+                             "  Examples:",
+                            @"  DirectorySynchronization C:\SourceDir\ C:\DestinationDir\",
+                            @"  DirectorySynchronization 'C:\User data\' C:\DestinationDir\ -ld C:\Log\ -i 60 -c BYTES -v YES"
+                            };
+
+            Console.WriteLine("\n\n- - - - - - - H E L P - - - - - - -\n\n");
+            foreach (string line in help)
+            {
+                Console.WriteLine(line + "\n");
+            }
+            Console.WriteLine("\n\n- - - - - - - H E L P - - - - - - -");
+        }
+
+
+
+        static ComandLineArgs ProcessArguments(string[] args)
+        {
+            ComandLineArgs comandLineArgs = new();
+
+            comandLineArgs.sourcePath = args[0];
+            if (!comandLineArgs.sourcePath.EndsWith(@"\")) { comandLineArgs.sourcePath = comandLineArgs.sourcePath + @"\"; }
+            if (!Directory.Exists(comandLineArgs.sourcePath)) { comandLineArgs.errorMessage = comandLineArgs.errorMessage + "Source path don't exist!\n"; }
+
+            comandLineArgs.destinationPath = args[1];
+            if (!comandLineArgs.destinationPath.EndsWith(@"\")) { comandLineArgs.destinationPath = comandLineArgs.destinationPath + @"\"; }
+            if (!Directory.Exists(comandLineArgs.destinationPath)) { comandLineArgs.errorMessage = comandLineArgs.errorMessage + "Destination path don't exist!\n"; }
+
+            int i;
+            i = Array.IndexOf(args, "-ld");
+            if (i != -1)
+            {
+                if (i + 1 < args.Length) 
+                {
+                    comandLineArgs.logPath = args[i + 1];
+                    if (!comandLineArgs.logPath.EndsWith(@"\")) { comandLineArgs.logPath = comandLineArgs.logPath + @"\"; }
+                    if (!Directory.Exists(comandLineArgs.logPath)) { comandLineArgs.errorMessage = comandLineArgs.errorMessage + "Log path don't exist!\n"; }
+                }
+                else
+                {
+                    comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-ld parameter is set but no log path was found!\n";
+                }
+            }
+
+
+            i = Array.IndexOf(args, "-i");
+            if (i != -1)
+            {
+                if (i + 1 < args.Length)
+                {
+                    try
+                    {
+                        comandLineArgs.syncInterval = Convert.ToInt32(args[i + 1]);
+                        if (comandLineArgs.syncInterval == 0) { comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-i must be at least 1 minute!\n"; }
+                    }
+                    catch (OverflowException)
+                    {
+                        comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-i parameter is outside the range of the Int32 type!\n";
+                    }
+                    catch (FormatException)
+                    {
+                        comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-i parameter is not in a recognizable format!\n";
+                    }
+                }
+                else
+                {
+                    comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-i parameter is set but no number was found!\n";
+                }
+            }
+
+
+            i = Array.IndexOf(args, "-c");
+            if (i != -1)
+            {
+                if (i + 1 < args.Length)
+                {
+                    string comparativeMethod = args[i + 1];
+
+                    switch (comparativeMethod.ToLower())
+                    {
+                        case "md5":
+                            comandLineArgs.comparativeMethod = 1;
+                            break;
+
+                        case "bytes":
+                            comandLineArgs.comparativeMethod = 2;
+                            break;
+
+                        default:
+                            comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-c parameter is set but no valid method was found!\n";
+                            break;
+
+                    }
+                }
+                else
+                {
+                    comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-c parameter is set but no valid method was found!\n";
+                }
+            }
+
+
+            i = Array.IndexOf(args, "-v");
+            if (i != -1)
+            {
+                if (i + 1 < args.Length)
+                {
+                    string verboseLogging = args[i + 1];
+
+                    switch (verboseLogging.ToLower())
+                    {
+                        case "no":
+                            comandLineArgs.verboseLogging = false;
+                            break;
+
+                        case "yes":
+                            comandLineArgs.verboseLogging = true;
+                            break;
+
+                        default:
+                            comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-v parameter is set but no valid parameter was found!\n";
+                            break;
+
+                    }
+                }
+                else
+                {
+                    comandLineArgs.errorMessage = comandLineArgs.errorMessage + "-v parameter is set but no valid parameter was found!\n";
+                }
+            }
+
+            return comandLineArgs;
+        }
+
 
         static void Main(string[] args)
         {
-            // dohliadni na to aby cesta nekoncila lomitkom
-            // comparativeMethod: 1 - MD5, 2 - ByteToByte
+            if (args.Length < 2)
+            {
+                DisplayHelp();
+            }
+            else
+            {
+                ComandLineArgs comandLineArgs = ProcessArguments(args);
 
+                if (comandLineArgs.errorMessage.Equals(""))
+                {
+                    LogPath = comandLineArgs.logPath;
+                    VerboseLogging = comandLineArgs.verboseLogging;
 
-            WriteLog("Synchronization_Start", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss"));
+                    WriteLog("Synchronization_Start", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss"));
 
-            UpdateDirectory(@"D:\x_test_folder\source", @"D:\x_test_folder\dest", 2);
+                    UpdateDirectory(comandLineArgs);
 
-            WriteLog("Synchronization_Finish", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss") + "\n----------------------------");
+                    WriteLog("Synchronization_Finish", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss") + "\n----------------------------");
+                }
+                else
+                {
+                    Console.WriteLine("\n\nSome of set parameters was not valid. Please see error message:\n");
+                    Console.WriteLine(comandLineArgs.errorMessage);
+                    DisplayHelp();
+                }
 
+            }
         }
+
+
+
     }
 }
+
