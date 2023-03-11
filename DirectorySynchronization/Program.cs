@@ -4,14 +4,18 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Timers;
 
 namespace DirectorySynchronization
 {
     class Program
     {
-        static string LogPath = "";
-        static bool VerboseLogging = false;
+        private static System.Timers.Timer aTimer;
+        
+        //global variable to carry all command line arguments. Even optional one.
+        static ComandLineArgs ComandlineArguments = new();
 
+        // all information about file and directory necessary for copy delete decisions
         public class FolderElement : IEquatable<FolderElement>
         {
             // only name with extension(if it's file) without path
@@ -41,6 +45,7 @@ namespace DirectorySynchronization
             }
         }
 
+        // HashSet comparer for basic comparation without file size and last write time
         public class NameAndPathComparer : IEqualityComparer<FolderElement>
         {
             public bool Equals(FolderElement x, FolderElement y)
@@ -62,6 +67,7 @@ namespace DirectorySynchronization
             }
         }
 
+        // HashSet comparer for detailed comparation with file size and last write time
         public class FileComparer : IEqualityComparer<FolderElement>
         {
             public bool Equals(FolderElement x, FolderElement y)
@@ -87,6 +93,7 @@ namespace DirectorySynchronization
             }
         }
 
+        // for storage all command line argument with predefined values. Event for not mandatory command line parameters
         public class ComandLineArgs
         {
             public string sourcePath;
@@ -110,14 +117,20 @@ namespace DirectorySynchronization
             }
         }
 
+        // write log for console and file.
+        // !! Name of log file is predefined and cannot be changed with command line parameters.
         static void WriteLog(string operation, string message)
         {
             string text = operation + ": " + message;
 
             Console.WriteLine(text);
-            System.IO.File.AppendAllText(LogPath + "log.txt", text + Environment.NewLine);
+            System.IO.File.AppendAllText(ComandlineArguments.logPath + "log.txt", text + Environment.NewLine);
         }
 
+        // recursivelly search thru directory and store all informations about files and directories for later comparation
+        // it's used for both source and destination directory
+        // it handle exceptions for: UnauthorizedAccessException and  PathTooLongException
+        //  - these exceptions are logging so user see for example if there are all access right set correctly for all subdirectories
         static HashSet<FolderElement> SearchDirectory(string basePath, string path)
         {
             HashSet<FolderElement> folderElements = new HashSet<FolderElement>();
@@ -177,7 +190,7 @@ namespace DirectorySynchronization
 
                     folderElements.Add(folderElement);
 
-                    if (VerboseLogging == true) { WriteLog("List_File", file); }
+                    if (ComandlineArguments.verboseLogging == true) { WriteLog("List_File", file); }
                 }
             }
 
@@ -195,7 +208,7 @@ namespace DirectorySynchronization
 
                     folderElements.Add(folderElement);
 
-                    if (VerboseLogging == true) { WriteLog("List_Dir", dir); }
+                    if (ComandlineArguments.verboseLogging == true) { WriteLog("List_Dir", dir); }
 
                     folderElements.UnionWith(SearchDirectory(basePath, path + dirInfo.Name + @"\"));
                 }
@@ -204,6 +217,7 @@ namespace DirectorySynchronization
             return (folderElements);
         }
 
+        // calculate MD5 for all files that are requested for detail comparation
         static string CalculateMD5ForFile(string fileName)
         {
             MD5 md5 = MD5.Create();
@@ -214,6 +228,8 @@ namespace DirectorySynchronization
             return (BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant());
         }
 
+        // this is just test function for comparation how long would took to synchronize directories with byte to byte check
+        // can be choosed as parameter from command line option "-c BYTES"
         static bool FilesBytesContentCompare(string sourceFileName, string destinationFileName)
         {
             int sourceFilebyte;
@@ -241,9 +257,27 @@ namespace DirectorySynchronization
             return result;
         }
 
-
+        // main function for comparation source and destination directories
+        // it's using HashSet for processing all informations about files and folders
+        // - because it's fast for comparation
+        // - hash code is unique for directory \\path\\name
+        // - and also for file \\path\\name\\ [size, last access time]
+        // this function contain 6 logical steps:
+        //
+        // 1. retrieve data for all source and destination directories and files
+        // 2. delete all files from destination if they dont't exist in source structure
+        //    - NOTE: part of those files could be removed even by step 3. but that would require additional code for log those files
+        //            because they would be deleted by System.IO.Directory.Delete( , true) and there is no log output
+        // 3. delete all destination directories and subdirectories
+        //    - also with files if there are left any form step 2.
+        // 4. create all destination directories and subdirectories if they dont't exist
+        // 5. copy new files to destination directories if they dont't exist they are not same (date, size, content)
+        // 6. check files that exist in source and destination and have same last access time and size for content and if there are diffrences then copy only those
+        // 
+        // and also handle most common exception in this process with logging 
         static void UpdateDirectory(ComandLineArgs comandLineArgs)
         {
+            // 1. retrieve data for all source and destination directories and files
             HashSet<FolderElement> sourceFolderElements = SearchDirectory(comandLineArgs.sourcePath, @"\");
             HashSet<FolderElement> destinationFolderElements = SearchDirectory(comandLineArgs.destinationPath, @"\");
 
@@ -251,7 +285,7 @@ namespace DirectorySynchronization
             HashSet<FolderElement> filesToDelete = new();
             filesToDelete = destinationFolderElements.Except(sourceFolderElements, new NameAndPathComparer()).Where(f => f.IsDirectory == false).ToHashSet();
 
-            // delete all files from destination if they dont't exist in source structure
+            // 2. delete all files from destination if they dont't exist in source structure
             foreach (FolderElement fileTD in filesToDelete)
             {
                 try
@@ -285,7 +319,7 @@ namespace DirectorySynchronization
             HashSet<FolderElement> directoriesToDelete = new();
             directoriesToDelete = destinationFolderElements.Except(sourceFolderElements, new NameAndPathComparer()).Where(f => f.IsDirectory == true).ToHashSet();
 
-            // delete all destination directories and subdirectories with files if they dont't exist in source structure
+            // 3. delete all destination directories and subdirectories with files if they dont't exist in source structure
             foreach (FolderElement directoryTD in directoriesToDelete)
             {
                 try
@@ -318,7 +352,7 @@ namespace DirectorySynchronization
             HashSet<FolderElement> directoriesToCreate = new();
             directoriesToCreate = sourceFolderElements.Except(destinationFolderElements, new NameAndPathComparer()).Where(f => f.IsDirectory == true).ToHashSet();
 
-            // create all destination directories and subdirectories if they dont't exist
+            // 4. create all destination directories and subdirectories if they dont't exist
             foreach (FolderElement directoryTC in directoriesToCreate)
             {
                 try
@@ -352,7 +386,7 @@ namespace DirectorySynchronization
             HashSet<FolderElement> filesToCopy = new();
             filesToCopy = sourceFolderElements.Except(destinationFolderElements, new FileComparer()).Where(f => f.IsDirectory == false).ToHashSet();
 
-            // copy new files to destination directories if they dont't exist they are not same (date, size, content)
+            // 5. copy new files to destination directories if they dont't exist they are not same (date, size, content)
             foreach (FolderElement filesTC in filesToCopy)
             {
                 try
@@ -381,7 +415,7 @@ namespace DirectorySynchronization
                 }
             }
 
-            // check files that exist in source and destination and have same last access time and size for content
+            // 6. check files that exist in source and destination and have same last access time and size for content and if there are diffrences then copy only those
             HashSet<FolderElement> filesToCheckContent = new();
             filesToCheckContent = sourceFolderElements.Intersect(destinationFolderElements, new FileComparer()).Where(f => f.IsDirectory == false).ToHashSet();
             foreach (FolderElement filesTCC in filesToCheckContent)
@@ -433,6 +467,8 @@ namespace DirectorySynchronization
             }
         }
 
+        // display help for console when app is started without parameters or there are some error with processing parameters
+        // all infomations are below in string[] help
         static void DisplayHelp()
         {
             string[] help = {"Syntax:",
@@ -459,8 +495,14 @@ namespace DirectorySynchronization
             Console.WriteLine("\n\n- - - - - - - H E L P - - - - - - -");
         }
 
-
-
+        // parse all command line parameters and if there are some problems return error message with information for user
+        // parameters are:
+        //  arg[0]      - sourcePath
+        //  arg[1]      - destinationPath
+        //  arg[#i] -ld - logPath
+        //  arg[#i] -i  - syncInterval  
+        //  arg[#i] -c  - comparativeMethod
+        //  arg[#i] -v  - verboseLogging
         static ComandLineArgs ProcessArguments(string[] args)
         {
             ComandLineArgs comandLineArgs = new();
@@ -578,7 +620,23 @@ namespace DirectorySynchronization
             return comandLineArgs;
         }
 
+        // main function for timer to run
+        // !!! there is no solution yet for possibility when synchronization took longer than interval for repeated process !!!
+        private static void RunApp(Object source, ElapsedEventArgs e)
+        {
+            WriteLog("Synchronization_Start", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss"));
 
+            UpdateDirectory(ComandlineArguments);
+
+            WriteLog("Synchronization_Finish", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss") + "\n----------------------------");
+
+            aTimer.Interval = ComandlineArguments.syncInterval * 60000;
+            aTimer.AutoReset = true;
+        }
+
+
+        // - check and process command line parameters
+        // - if everything ok then set timer with function RunApp
         static void Main(string[] args)
         {
             if (args.Length < 2)
@@ -587,23 +645,26 @@ namespace DirectorySynchronization
             }
             else
             {
-                ComandLineArgs comandLineArgs = ProcessArguments(args);
+                ComandlineArguments = ProcessArguments(args);
 
-                if (comandLineArgs.errorMessage.Equals(""))
+                if (ComandlineArguments.errorMessage.Equals(""))
                 {
-                    LogPath = comandLineArgs.logPath;
-                    VerboseLogging = comandLineArgs.verboseLogging;
+                    Console.WriteLine("\nPress any key to exit the application...\n");
 
-                    WriteLog("Synchronization_Start", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss"));
+                    aTimer = new System.Timers.Timer(1);
+                    aTimer.Elapsed += RunApp;
+                    aTimer.AutoReset = false;
+                    aTimer.Enabled = true;
 
-                    UpdateDirectory(comandLineArgs);
+                    Console.ReadKey();
 
-                    WriteLog("Synchronization_Finish", DateTime.Now.ToString("yyyy.MM.dd HH:mm:ss") + "\n----------------------------");
+                    aTimer.Stop();
+                    aTimer.Dispose();
                 }
                 else
                 {
-                    Console.WriteLine("\n\nSome of set parameters was not valid. Please see error message:\n");
-                    Console.WriteLine(comandLineArgs.errorMessage);
+                    Console.WriteLine("\n\nSome of command line parameters was not valid. Please see error message:\n");
+                    Console.WriteLine(ComandlineArguments.errorMessage);
                     DisplayHelp();
                 }
 
